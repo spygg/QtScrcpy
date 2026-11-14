@@ -461,6 +461,10 @@ void Dialog::initAdvancedConfigUi(QWidget *parent)
     m_configRenderExpiredCheck = new QCheckBox(tr("Render expired video frames"), group);
     layout->addRow(m_configRenderExpiredCheck);
 
+    m_configAutoReconnectCheck = new QCheckBox(tr("Auto reconnect on device drop"), group);
+    m_configAutoReconnectCheck->setToolTip(tr("Automatically reconnect a device when its stream drops unexpectedly (e.g. a device-side encoder crash). User-initiated disconnects are not reconnected."));
+    layout->addRow(m_configAutoReconnectCheck);
+
     m_configOpenGlBox = new QComboBox(group);
     m_configOpenGlBox->addItem(tr("Automatic"), -1);
     m_configOpenGlBox->addItem(tr("Software OpenGL"), 0);
@@ -526,6 +530,7 @@ void Dialog::loadAdvancedConfig()
     m_configPushPathEdit->setText(config.getPushFilePath());
     m_configMaxFpsSpin->setValue(qBound(0, config.getMaxFps(), m_configMaxFpsSpin->maximum()));
     m_configRenderExpiredCheck->setChecked(config.getRenderExpiredFrames() != 0);
+    m_configAutoReconnectCheck->setChecked(config.getAutoReconnect());
     m_configOpenGlBox->setCurrentIndex(qMax(0, m_configOpenGlBox->findData(config.getDesktopOpenGL())));
     m_configServerPathEdit->setText(config.getServerPath());
     m_configAdbPathEdit->setText(config.getAdbPath());
@@ -547,6 +552,7 @@ void Dialog::saveAdvancedConfig()
     values.insert("PushFilePath", pushPath);
     values.insert("MaxFps", m_configMaxFpsSpin->value());
     values.insert("RenderExpiredFrames", m_configRenderExpiredCheck->isChecked() ? 1 : 0);
+    values.insert("AutoReconnect", m_configAutoReconnectCheck->isChecked() ? 1 : 0);
     values.insert("UseDesktopOpenGL", m_configOpenGlBox->currentData());
     values.insert("ServerPath", m_configServerPathEdit->text().trimmed());
     values.insert("AdbPath", m_configAdbPathEdit->text().trimmed());
@@ -1123,6 +1129,7 @@ void Dialog::refreshApps()
 
 void Dialog::on_stopServerBtn_clicked()
 {
+    m_intentionalDisconnect.insert(ui->serialBox->currentText().trimmed());
     if (qsc::IDeviceManage::getInstance().disconnectDevice(ui->serialBox->currentText().trimmed())) {
         outLog("stop server");
     }
@@ -1265,6 +1272,14 @@ void Dialog::onDeviceConnected(bool success, const QString &serial, const QStrin
     qsc::IDeviceManage::getInstance().getDevice(serial)->setUserData(static_cast<void*>(videoForm));
     qsc::IDeviceManage::getInstance().getDevice(serial)->registerDeviceObserver(videoForm);
 
+    // A user-initiated window close must not trigger auto-reconnect.
+    connect(videoForm, &VideoForm::aboutToClose, this, [this](const QString &s) {
+        m_intentionalDisconnect.insert(s);
+    });
+
+    // Fresh session: reset any stale auto-reconnect counter for this serial.
+    m_autoReconnectCount.remove(serial);
+
 
     videoForm->showFPS(ui->fpsCheck->isChecked());
 
@@ -1303,18 +1318,51 @@ void Dialog::onDeviceConnected(bool success, const QString &serial, const QStrin
 
 void Dialog::onDeviceDisconnected(QString serial)
 {
+    // Was this an intentional user disconnect (window closed / disconnect button)?
+    const bool intentional = m_intentionalDisconnect.remove(serial);
+
     GroupController::instance().removeDevice(serial);
     auto device = qsc::IDeviceManage::getInstance().getDevice(serial);
-    if (!device) {
+    if (device) {
+        auto data = device->getUserData();
+        if (data) {
+            VideoForm* vf = static_cast<VideoForm*>(data);
+            device->deRegisterDeviceObserver(vf);
+            vf->close();
+            vf->deleteLater();
+        }
+    }
+
+    if (intentional || !Config::getInstance().getAutoReconnect()) {
+        m_autoReconnectCount.remove(serial);
         return;
     }
-    auto data = device->getUserData();
-    if (data) {
-        VideoForm* vf = static_cast<VideoForm*>(data);
-        qsc::IDeviceManage::getInstance().getDevice(serial)->deRegisterDeviceObserver(vf);
-        vf->close();
-        vf->deleteLater();
+
+    // Unexpected drop (e.g. device-side MediaCodec encoder crash). Try to bring
+    // the device back, but only up to a bounded number of attempts so a
+    // fundamentally incompatible encoder does not loop forever.
+    const int tries = m_autoReconnectCount.value(serial, 0);
+    if (tries >= AUTO_RECONNECT_MAX_TRIES) {
+        m_autoReconnectCount.remove(serial);
+        outLog(QString("device %1 dropped; auto-reconnect gave up after %2 attempts")
+                   .arg(serial).arg(tries), false);
+        return;
     }
+    m_autoReconnectCount[serial] = tries + 1;
+    outLog(QString("device %1 dropped (server/encoder crash); auto-reconnecting (%2/%3)...")
+               .arg(serial).arg(tries + 1).arg(AUTO_RECONNECT_MAX_TRIES), false);
+
+    const QString s = serial;
+    // Small backoff, growing with the attempt number.
+    QTimer::singleShot(800 * (tries + 1), this, [this, s]() {
+        int idx = ui->serialBox->findText(s);
+        if (idx < 0) {
+            ui->serialBox->addItem(s);
+            idx = ui->serialBox->findText(s);
+        }
+        ui->serialBox->setCurrentIndex(idx);
+        on_startServerBtn_clicked();
+    });
 }
 
 void Dialog::on_wirelessDisConnectBtn_clicked()
@@ -1323,6 +1371,7 @@ void Dialog::on_wirelessDisConnectBtn_clicked()
         return;
     }
     QString addr = ui->deviceIpEdt->currentText().trimmed();
+    m_intentionalDisconnect.insert(ui->serialBox->currentText().trimmed());
     outLog("wireless disconnect...", false);
     QStringList adbArgs;
     adbArgs << "disconnect";
@@ -1360,6 +1409,17 @@ void Dialog::on_clearOut_clicked()
 
 void Dialog::on_stopAllServerBtn_clicked()
 {
+    for (int i = 0; i < ui->serialBox->count(); ++i) {
+        m_intentionalDisconnect.insert(ui->serialBox->itemText(i));
+    }
+    for (int i = 0; i < ui->connectedPhoneList->count(); ++i) {
+        // connectedPhoneList shows "nickname-serial"; the serial is after the last '-'
+        const QString text = ui->connectedPhoneList->item(i)->text();
+        const int sep = text.lastIndexOf('-');
+        if (sep >= 0) {
+            m_intentionalDisconnect.insert(text.mid(sep + 1));
+        }
+    }
     qsc::IDeviceManage::getInstance().disconnectAllDevice();
 }
 

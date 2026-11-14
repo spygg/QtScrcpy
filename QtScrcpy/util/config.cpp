@@ -47,6 +47,9 @@
 #define COMMON_CODEC_NAME_KEY "CodecName"
 #define COMMON_CODEC_NAME_DEF ""
 
+#define COMMON_AUTO_RECONNECT_KEY "AutoReconnect"
+#define COMMON_AUTO_RECONNECT_DEF true
+
 // user config
 #define COMMON_RECORD_KEY "RecordPath"
 #define COMMON_RECORD_DEF ""
@@ -449,6 +452,15 @@ QString Config::getCodecName()
     codecName = m_settings->value(COMMON_CODEC_NAME_KEY, COMMON_CODEC_NAME_DEF).toString();
     m_settings->endGroup();
     return codecName;
+}
+
+bool Config::getAutoReconnect()
+{
+    bool autoReconnect;
+    m_settings->beginGroup(GROUP_COMMON);
+    autoReconnect = m_settings->value(COMMON_AUTO_RECONNECT_KEY, COMMON_AUTO_RECONNECT_DEF).toBool();
+    m_settings->endGroup();
+    return autoReconnect;
 }
 
 QString Config::getConfigDirectory()

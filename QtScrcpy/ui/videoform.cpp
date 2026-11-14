@@ -1025,6 +1025,7 @@ void VideoForm::closeEvent(QCloseEvent *event)
     if (!device) {
         return;
     }
+    emit aboutToClose(m_serial);
     Config::getInstance().setRect(device->getSerial(), geometry());
     device->disconnectDevice();
 }

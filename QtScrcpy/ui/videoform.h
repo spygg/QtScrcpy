@@ -29,6 +29,11 @@ public:
     void updateRender(int width, int height, uint8_t* dataY, uint8_t* dataU, uint8_t* dataV, int linesizeY, int linesizeU, int linesizeV);
     void setSerial(const QString& serial);
     QRect getGrabCursorRect();
+
+signals:
+    // Emitted right before the user closes the window so the controller can
+    // treat the resulting device drop as intentional (no auto-reconnect).
+    void aboutToClose(const QString &serial);
     const QSize &frameSize();
     void resizeSquare();
     void removeBlackRect();

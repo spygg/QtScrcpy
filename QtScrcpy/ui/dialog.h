@@ -8,6 +8,8 @@
 #include <QSystemTrayIcon>
 #include <QListWidget>
 #include <QTimer>
+#include <QSet>
+#include <QHash>
 
 
 #include "adbprocess.h"
@@ -139,6 +141,7 @@ private:
     QCheckBox *m_vdSystemDecorationsCheck = nullptr;
     QCheckBox *m_vdDestroyContentCheck = nullptr;
     QCheckBox *m_keepActiveCheck = nullptr;
+    QCheckBox *m_configAutoReconnectCheck = nullptr;
     QComboBox *m_startAppBox = nullptr;
     QPushButton *m_refreshAppsBtn = nullptr;
     QMenu *m_menu;
@@ -149,6 +152,13 @@ private:
     quint32 m_prevBitRate = 2000000;
     int m_prevMaxSizeIndex = 0;
     QPointer<PresetConfigDialog> m_presetDialog;
+
+    // Bounded auto-reconnect after an unexpected device drop (server/encoder
+    // crash). m_intentionalDisconnect marks serials the user closed/disconnected
+    // on purpose so we don't bounce them back.
+    QSet<QString> m_intentionalDisconnect;
+    QHash<QString, int> m_autoReconnectCount;
+    static constexpr int AUTO_RECONNECT_MAX_TRIES = 3;
 };
 
 #endif // DIALOG_H

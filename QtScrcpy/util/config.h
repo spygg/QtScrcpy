@@ -65,6 +65,7 @@ public:
     QString getLogLevel();
     QString getCodecOptions();
     QString getCodecName();
+    bool getAutoReconnect();
     QString getConfigDirectory();
     bool updateCommonConfig(const QMap<QString, QVariant> &values);
     QStringList getConnectedGroups();
