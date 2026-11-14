@@ -401,6 +401,38 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 #
+# Bundle ADB and scrcpy-server next to the executable for dev builds,
+# matching the release package layout (publish scripts copy the same files).
+# This keeps the exe-directory fallback in QtScrcpyCore working regardless
+# of the current working directory.
+#
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(QC_BUNDLE_DEST "${MACOS_BUNDLE_PATH}/MacOS")
+else()
+    set(QC_BUNDLE_DEST "${QSC_BIN_OUTPUT_PATH}")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    file(GLOB QC_ADB_FILES "${CMAKE_CURRENT_SOURCE_DIR}/QtScrcpyCore/src/third_party/adb/win/*")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    file(GLOB QC_ADB_FILES "${CMAKE_CURRENT_SOURCE_DIR}/QtScrcpyCore/src/third_party/adb/mac/*")
+else()
+    file(GLOB QC_ADB_FILES "${CMAKE_CURRENT_SOURCE_DIR}/QtScrcpyCore/src/third_party/adb/linux/*")
+endif()
+list(APPEND QC_BUNDLE_FILES ${QC_ADB_FILES})
+list(APPEND QC_BUNDLE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/QtScrcpyCore/src/third_party/scrcpy-server")
+
+foreach(QC_BUNDLE_FILE ${QC_BUNDLE_FILES})
+    if(EXISTS "${QC_BUNDLE_FILE}")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${QC_BUNDLE_FILE}" "${QC_BUNDLE_DEST}"
+        )
+    endif()
+endforeach()
+unset(QC_BUNDLE_FILES)
+unset(QC_ADB_FILES)
+
+#
 # common deps
 #
 

@@ -57,25 +57,26 @@ int main(int argc, char *argv[])
     }
 
     // set env
-#ifdef Q_OS_WIN32
-    qputenv("QTSCRCPY_ADB_PATH", "../../../QtScrcpy/QtScrcpyCore/src/third_party/adb/win/adb.exe");
-    qputenv("QTSCRCPY_SERVER_PATH", "../../../QtScrcpy/QtScrcpyCore/src/third_party/scrcpy-server");
+    // Resolve the development fallbacks against the executable directory
+    // (not the current working directory, which varies with launcher), and
+    // never override values provided by deployment wrappers (same guard as
+    // the Linux branch below).
+    const QString devAdbPath = QDir(repositoryRoot).filePath(
+#if defined(Q_OS_WIN32)
+        "QtScrcpy/QtScrcpyCore/src/third_party/adb/win/adb.exe"
+#elif defined(Q_OS_MACOS)
+        "QtScrcpy/QtScrcpyCore/src/third_party/adb/mac/adb"
+#else
+        "QtScrcpy/QtScrcpyCore/src/third_party/adb/linux/adb"
 #endif
-
-#ifdef Q_OS_MACOS
-    qputenv("QTSCRCPY_ADB_PATH", "../../../../../../QtScrcpy/QtScrcpyCore/src/third_party/adb/mac/adb");
-    qputenv("QTSCRCPY_SERVER_PATH", "../../../../../../QtScrcpy/QtScrcpyCore/src/third_party/scrcpy-server");
-#endif
-
-#ifdef Q_OS_LINUX
-    // Only set environment variables if they are not already set (e.g., by AppImage AppRun)
+    );
+    const QString devServerPath = QDir(repositoryRoot).filePath("QtScrcpy/QtScrcpyCore/src/third_party/scrcpy-server");
     if (qgetenv("QTSCRCPY_ADB_PATH").isEmpty()) {
-        qputenv("QTSCRCPY_ADB_PATH", "../../../QtScrcpy/QtScrcpyCore/src/third_party/adb/linux/adb");
+        qputenv("QTSCRCPY_ADB_PATH", devAdbPath.toLocal8Bit());
     }
     if (qgetenv("QTSCRCPY_SERVER_PATH").isEmpty()) {
-        qputenv("QTSCRCPY_SERVER_PATH", "../../../QtScrcpy/QtScrcpyCore/src/third_party/scrcpy-server");
+        qputenv("QTSCRCPY_SERVER_PATH", devServerPath.toLocal8Bit());
     }
-#endif
 
     g_msgType = covertLogLevel(Config::getInstance().getLogLevel());
 
