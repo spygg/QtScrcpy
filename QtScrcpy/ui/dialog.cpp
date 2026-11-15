@@ -32,6 +32,8 @@
 
 #include "config.h"
 #include "dialog.h"
+// See Dialog::SOFTWARE_H264_ENCODER in dialog.h.
+const char *const Dialog::SOFTWARE_H264_ENCODER = "OMX.google.h264.encoder";
 #include "ui_dialog.h"
 #include "videoform.h"
 #include "../groupcontroller/groupcontroller.h"
@@ -892,6 +894,13 @@ void Dialog::on_startServerBtn_clicked()
         params.codecOptions = Config::getInstance().getCodecOptions();
         params.codecName = Config::getInstance().getCodecName();
     }
+    // Auto-reconnect escalation: if a previous attempt crashed the device's
+    // hardware encoder, force the Google software H.264 encoder for this one
+    // reconnect attempt (set by onDeviceDisconnected). It is cleared right after
+    // the call so a later manual connect still uses the configured codec.
+    if (!m_reconnectCodecOverride.isEmpty()) {
+        params.codecName = m_reconnectCodecOverride;
+    }
     params.scid = QRandomGenerator::global()->bounded(1, 10000) & 0x7FFFFFFF;
     params.decodeMode = ui->decodeModeBox->currentIndex();
     // Disabled widgets may remain checked from persisted settings. Advanced
@@ -1279,6 +1288,8 @@ void Dialog::onDeviceConnected(bool success, const QString &serial, const QStrin
 
     // Fresh session: reset any stale auto-reconnect counter for this serial.
     m_autoReconnectCount.remove(serial);
+    // A successful connect ends any codec escalation from auto-reconnect.
+    m_reconnectCodecOverride.clear();
 
 
     videoForm->showFPS(ui->fpsCheck->isChecked());
@@ -1335,6 +1346,7 @@ void Dialog::onDeviceDisconnected(QString serial)
 
     if (intentional || !Config::getInstance().getAutoReconnect()) {
         m_autoReconnectCount.remove(serial);
+        m_reconnectCodecOverride.clear();
         return;
     }
 
@@ -1344,13 +1356,25 @@ void Dialog::onDeviceDisconnected(QString serial)
     const int tries = m_autoReconnectCount.value(serial, 0);
     if (tries >= AUTO_RECONNECT_MAX_TRIES) {
         m_autoReconnectCount.remove(serial);
+        m_reconnectCodecOverride.clear();
         outLog(QString("device %1 dropped; auto-reconnect gave up after %2 attempts")
                    .arg(serial).arg(tries), false);
         return;
     }
     m_autoReconnectCount[serial] = tries + 1;
-    outLog(QString("device %1 dropped (server/encoder crash); auto-reconnecting (%2/%3)...")
-               .arg(serial).arg(tries + 1).arg(AUTO_RECONNECT_MAX_TRIES), false);
+    // The first reconnect reuses the configured codec (a transient crash may not
+    // recur). From the second attempt on, escalate to the software H.264 encoder
+    // because the hardware one keeps dying.
+    if (tries + 1 >= 2) {
+        m_reconnectCodecOverride = SOFTWARE_H264_ENCODER;
+    } else {
+        m_reconnectCodecOverride.clear();
+    }
+    outLog(QString("device %1 dropped (server/encoder crash); auto-reconnecting (%2/%3)%4...")
+               .arg(serial).arg(tries + 1).arg(AUTO_RECONNECT_MAX_TRIES)
+               .arg(m_reconnectCodecOverride.isEmpty()
+                    ? QString()
+                    : QString(" [software encoder]")), false);
 
     const QString s = serial;
     // Small backoff, growing with the attempt number.
@@ -1362,6 +1386,8 @@ void Dialog::onDeviceDisconnected(QString serial)
         }
         ui->serialBox->setCurrentIndex(idx);
         on_startServerBtn_clicked();
+        // The override applies to exactly this one reconnect attempt.
+        m_reconnectCodecOverride.clear();
     });
 }
 

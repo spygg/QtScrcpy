@@ -159,6 +159,17 @@ private:
     QSet<QString> m_intentionalDisconnect;
     QHash<QString, int> m_autoReconnectCount;
     static constexpr int AUTO_RECONNECT_MAX_TRIES = 3;
+
+    // When an auto-reconnect escalates after the device's hardware encoder
+    // keeps crashing, this overrides the codec name with a software encoder for
+    // the next (and only the next) reconnect attempt. Empty means "use the
+    // configured codec".
+    QString m_reconnectCodecOverride;
+
+    // Google's software H.264 encoder — the universal fallback when a device's
+    // hardware MediaCodec encoder is unstable (e.g. OMX.MTK.VIDEO.ENCODER.AVC on
+    // TrebleDroid/GSI builds).
+    static const char *const SOFTWARE_H264_ENCODER;
 };
 
 #endif // DIALOG_H
