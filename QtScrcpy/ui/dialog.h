@@ -46,6 +46,9 @@ public:
 private slots:
     void onDeviceConnected(bool success, const QString& serial, const QString& deviceName, const QSize& size);
     void onDeviceDisconnected(QString serial);
+    // Invoked from the Qt message handler when scrcpy-server reports a
+    // MediaCodec capture/encoding error. See handleEncoderCrash() in dialog.cpp.
+    void handleEncoderCrash();
 
     void on_updateDevice_clicked();
     void on_startServerBtn_clicked();
@@ -166,10 +169,13 @@ private:
     // configured codec".
     QString m_reconnectCodecOverride;
 
-    // Google's software H.264 encoder — the universal fallback when a device's
-    // hardware MediaCodec encoder is unstable (e.g. OMX.MTK.VIDEO.ENCODER.AVC on
-    // TrebleDroid/GSI builds).
-    static const char *const SOFTWARE_H264_ENCODER;
+    // The bundled scrcpy-server does NOT exit when its hardware MediaCodec
+    // encoder dies: it retries internally (-m1024/-m800), so
+    // deviceDisconnected never fires and the disconnect-based fallback above
+    // cannot help. These track a log-driven fallback instead.
+    QHash<QString, int> m_encoderFallbackTries;      // serial -> escalation step
+    QHash<QString, QString> m_softwareEncoderPins;   // serial -> encoder to keep using
+    QSet<QString> m_encoderFallbackPending;         // serials with a reconnect in flight
 };
 
 #endif // DIALOG_H

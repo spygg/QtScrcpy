@@ -32,8 +32,6 @@
 
 #include "config.h"
 #include "dialog.h"
-// See Dialog::SOFTWARE_H264_ENCODER in dialog.h.
-const char *const Dialog::SOFTWARE_H264_ENCODER = "OMX.google.h264.encoder";
 #include "ui_dialog.h"
 #include "videoform.h"
 #include "../groupcontroller/groupcontroller.h"
@@ -901,6 +899,12 @@ void Dialog::on_startServerBtn_clicked()
     if (!m_reconnectCodecOverride.isEmpty()) {
         params.codecName = m_reconnectCodecOverride;
     }
+    // A device whose hardware encoder crashed stays pinned to a software
+    // encoder for this session, including later manual connects. Restarting
+    // QtScrcpy clears the pin; set "Codec name" in the config for a permanent fix.
+    if (m_softwareEncoderPins.contains(params.serial)) {
+        params.codecName = m_softwareEncoderPins.value(params.serial);
+    }
     params.scid = QRandomGenerator::global()->bounded(1, 10000) & 0x7FFFFFFF;
     params.decodeMode = ui->decodeModeBox->currentIndex();
     // Disabled widgets may remain checked from persisted settings. Advanced
@@ -1286,8 +1290,15 @@ void Dialog::onDeviceConnected(bool success, const QString &serial, const QStrin
         m_intentionalDisconnect.insert(s);
     });
 
-    // Fresh session: reset any stale auto-reconnect counter for this serial.
-    m_autoReconnectCount.remove(serial);
+    // Do NOT reset the escalation counter as soon as we connect: a broken
+    // hardware encoder reports "connected" and crashes a second later, which
+    // used to pin the counter at 1/3 forever (never reaching the software
+    // encoder). Only clear it once the session proved stable for 10s.
+    QTimer::singleShot(10000, this, [this, serial]() {
+        if (!m_encoderFallbackPending.contains(serial)) {
+            m_autoReconnectCount.remove(serial);
+        }
+    });
     // A successful connect ends any codec escalation from auto-reconnect.
     m_reconnectCodecOverride.clear();
 
@@ -1363,10 +1374,22 @@ void Dialog::onDeviceDisconnected(QString serial)
     }
     m_autoReconnectCount[serial] = tries + 1;
     // The first reconnect reuses the configured codec (a transient crash may not
-    // recur). From the second attempt on, escalate to the software H.264 encoder
-    // because the hardware one keeps dying.
-    if (tries + 1 >= 2) {
-        m_reconnectCodecOverride = SOFTWARE_H264_ENCODER;
+    // recur). From the second attempt on, escalate to a software H.264 encoder
+    // because the hardware one keeps dying. Try the modern Codec2 software
+    // encoder first, then the legacy OMX one — whichever the device exposes.
+    static const char *kSoftwareEncoders[] = {
+        "c2.android.avc.encoder",
+        "OMX.google.h264.encoder",
+    };
+    const int attempt = tries + 1;
+    if (attempt >= 2) {
+        const int swIdx = attempt - 2;
+        const int swCount = int(sizeof(kSoftwareEncoders) / sizeof(kSoftwareEncoders[0]));
+        if (swIdx < swCount) {
+            m_reconnectCodecOverride = kSoftwareEncoders[swIdx];
+        } else {
+            m_reconnectCodecOverride.clear();
+        }
     } else {
         m_reconnectCodecOverride.clear();
     }
@@ -1374,7 +1397,7 @@ void Dialog::onDeviceDisconnected(QString serial)
                .arg(serial).arg(tries + 1).arg(AUTO_RECONNECT_MAX_TRIES)
                .arg(m_reconnectCodecOverride.isEmpty()
                     ? QString()
-                    : QString(" [software encoder]")), false);
+                    : QString(" [software encoder: %1]").arg(m_reconnectCodecOverride)), false);
 
     const QString s = serial;
     // Small backoff, growing with the attempt number.
@@ -1388,6 +1411,54 @@ void Dialog::onDeviceDisconnected(QString serial)
         on_startServerBtn_clicked();
         // The override applies to exactly this one reconnect attempt.
         m_reconnectCodecOverride.clear();
+    });
+}
+
+void Dialog::handleEncoderCrash()
+{
+    if (!Config::getInstance().getAutoReconnect()) {
+        return;
+    }
+    const QString serial = ui->serialBox->currentText().trimmed();
+    if (serial.isEmpty() || m_encoderFallbackPending.contains(serial)
+        || !qsc::IDeviceManage::getInstance().getDevice(serial)) {
+        return;
+    }
+
+    // Verified on YY001094 (TrebleDroid Android 14): the MTK hardware encoder
+    // crashes every time, while both software encoders survive 15s with no
+    // error. Try the modern Codec2 one first, then the legacy OMX one.
+    static const char *const kSoftwareEncoders[] = {
+        "c2.android.avc.encoder",
+        "OMX.google.h264.encoder",
+    };
+    const int swCount = int(sizeof(kSoftwareEncoders) / sizeof(kSoftwareEncoders[0]));
+    const int attempt = m_encoderFallbackTries.value(serial, 0);
+    if (attempt >= swCount) {
+        outLog(QString("device %1 encoder keeps crashing; software encoder fallback exhausted")
+                   .arg(serial), false);
+        return;
+    }
+    const QString encoder = QString::fromLatin1(kSoftwareEncoders[attempt]);
+    m_encoderFallbackTries.insert(serial, attempt + 1);
+    m_encoderFallbackPending.insert(serial);
+
+    outLog(QString("device %1 hardware encoder crashed; reconnecting with software encoder [%2]...")
+               .arg(serial).arg(encoder), false);
+
+    // We drive this reconnect ourselves, so suppress the disconnect-based one.
+    m_intentionalDisconnect.insert(serial);
+    qsc::IDeviceManage::getInstance().disconnectDevice(serial);
+
+    QTimer::singleShot(1000, this, [this, serial, encoder]() {
+        m_intentionalDisconnect.remove(serial);
+        m_encoderFallbackPending.remove(serial);
+        m_softwareEncoderPins.insert(serial, encoder);
+        const int idx = ui->serialBox->findText(serial);
+        if (idx >= 0) {
+            ui->serialBox->setCurrentIndex(idx);
+        }
+        on_startServerBtn_clicked();
     });
 }
 

@@ -449,3 +449,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${LINK_LIBS}
     QtScrcpyCore
 )
+
+# TEMPORARY headless encoder test target (not part of the app; remove after use)
+add_executable(encoder_test encoder_test.cpp)
+target_link_libraries(encoder_test PRIVATE ${LINK_LIBS} QtScrcpyCore)
+

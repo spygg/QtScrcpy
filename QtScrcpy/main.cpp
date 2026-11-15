@@ -269,7 +269,17 @@ QtMsgType covertLogLevel(const QString &logLevel)
 void myMessageOutput(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
     QString outputMsg;
-    
+
+    // scrcpy-server does not exit when the device's hardware MediaCodec encoder
+    // crashes; it keeps retrying with lower resolutions (-m1024/-m800). Since
+    // the client never sees a disconnect, the dialog's reconnect path cannot
+    // fire. Detect the server error here, BEFORE log-level filtering, and let
+    // the dialog switch that device to a software encoder. Queued so we never
+    // touch widgets from a non-GUI thread.
+    if (g_mainDlg && msg.contains(QStringLiteral("Capture/encoding error"))) {
+        QMetaObject::invokeMethod(g_mainDlg, "handleEncoderCrash", Qt::QueuedConnection);
+    }
+
 #ifdef ENABLE_DETAILED_LOGS
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
     
