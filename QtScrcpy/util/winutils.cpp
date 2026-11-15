@@ -1,7 +1,9 @@
 #include <QDebug>
 #include <Windows.h>
 #include <dwmapi.h>
+#ifdef _MSC_VER
 #pragma comment(lib, "dwmapi")
+#endif
 
 #include "winutils.h"
 
@@ -11,9 +13,13 @@ enum : WORD
     DwmwaUseImmersiveDarkModeBefore20h1 = 19
 };
 
-WinUtils::WinUtils(){};
+WinUtils::WinUtils()
+{
+}
 
-WinUtils::~WinUtils(){};
+WinUtils::~WinUtils()
+{
+}
 
 // Set dark border to window
 // Reference: qt/qtbase.git/tree/src/plugins/platforms/windows/qwindowswindow.cpp

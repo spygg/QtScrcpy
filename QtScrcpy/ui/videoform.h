@@ -29,17 +29,20 @@ public:
     void updateRender(int width, int height, uint8_t* dataY, uint8_t* dataU, uint8_t* dataV, int linesizeY, int linesizeU, int linesizeV);
     void setSerial(const QString& serial);
     QRect getGrabCursorRect();
-
-signals:
-    // Emitted right before the user closes the window so the controller can
-    // treat the resulting device drop as intentional (no auto-reconnect).
-    void aboutToClose(const QString &serial);
+    // Getter for the current decoded frame size (used by the group controller).
+    // Declared in the public section, not as a signal: it returns a value and
+    // is never emitted.
     const QSize &frameSize();
     void resizeSquare();
     void removeBlackRect();
     void showFPS(bool show);
     void switchFullScreen();
     bool isHost();
+
+signals:
+    // Emitted right before the user closes the window so the controller can
+    // treat the resulting device drop as intentional (no auto-reconnect).
+    void aboutToClose(const QString &serial);
 
 private:
     void onFrame(int width, int height, uint8_t* dataY, uint8_t* dataU, uint8_t* dataV,

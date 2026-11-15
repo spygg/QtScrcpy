@@ -332,6 +332,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/sndcpy/sndcpy.bat" "${QSC_BIN_OUTPUT_PATH}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/sndcpy/sndcpy.apk" "${QSC_BIN_OUTPUT_PATH}"
     )
+
+    # dwmapi is auto-linked via #pragma comment(lib,...) on MSVC, but MinGW
+    # ignores that pragma, so link it explicitly for non-MSVC Windows builds.
+    if(NOT MSVC)
+        target_link_libraries(${PROJECT_NAME} PRIVATE dwmapi)
+    endif()
 endif()
 
 # MacOS
